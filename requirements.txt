@@ -13,6 +13,8 @@ wordcloud
 PyPDF2
 pytesseract
 pillow
+graphviz
+anthropic
 python-dotenv
 xai_sdk
 pdf2image
