@@ -2,7 +2,7 @@ import os
 import json
 import re
 import random
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 import streamlit as st
 import yaml
@@ -25,10 +25,8 @@ SUPPORTED_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
     "gemini-3-pro-preview",
-    # Anthropic / Claude – user can type exact model in agents.yaml, we expose generic labels
     "claude-3-5-sonnet-latest",
     "claude-3-5-haiku-latest",
-    # Grok
     "grok-4-fast-reasoning",
     "grok-3-mini",
 ]
@@ -56,7 +54,6 @@ PAINTER_STYLES = [
     "Andy Warhol",
 ]
 
-# Very lightweight style presets (background / accent)
 PAINTER_STYLE_PALETTES = {
     "Vincent van Gogh": ("linear-gradient(135deg,#0f172a,#1e3a8a)", "#fbbf24"),
     "Claude Monet": ("linear-gradient(135deg,#e0f2fe,#bae6fd)", "#0369a1"),
@@ -308,14 +305,6 @@ def load_agents_config() -> Dict[str, Any]:
 
 
 def parse_skills_md() -> Dict[str, Dict[str, Any]]:
-    """
-    Very simple SKILL.md parser.
-
-    Expects sections like:
-    # Skill: regulation_analysis
-    **Description:** Analyze legal text and extract obligations.
-    **Parameters:** Source Document, Region.
-    """
     path = "SKILL.md"
     if not os.path.exists(path):
         return {}
@@ -325,7 +314,6 @@ def parse_skills_md() -> Dict[str, Dict[str, Any]]:
 
     skills: Dict[str, Dict[str, Any]] = {}
     blocks = re.split(r"^#\s*Skill:\s*", content, flags=re.MULTILINE)
-    # First block before the first Skill header is ignored
     for block in blocks[1:]:
         lines = block.splitlines()
         if not lines:
@@ -384,7 +372,6 @@ def detect_provider(model_name: str) -> str:
         return "anthropic"
     if mn.startswith("grok-"):
         return "grok"
-    # Default to OpenAI
     return "openai"
 
 
@@ -433,7 +420,6 @@ def call_llm(
             system=system_prompt or "",
             messages=[{"role": "user", "content": user_prompt}],
         )
-        # Anthropics content is a list of blocks
         text = ""
         for block in resp.content:
             if getattr(block, "type", None) == "text":
@@ -441,7 +427,6 @@ def call_llm(
         return text
 
     elif provider == "grok":
-        # Grok (xAI) is OpenAI-compatible with custom base_url
         api_key = keys.get("grok")
         if not api_key:
             raise RuntimeError("Missing Grok API key.")
@@ -539,13 +524,11 @@ Rules:
 
 
 def parse_json_from_llm(text: str) -> Dict[str, Any]:
-    # Try direct parse first
     try:
         return json.loads(text)
     except Exception:
         pass
 
-    # Try to extract largest {...} block
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if match:
         candidate = match.group(0)
@@ -620,7 +603,6 @@ def render_work_breakdown(plan: Dict[str, Any]):
         st.info("No work items in the plan yet.")
         return
 
-    # Simplified table
     rows = []
     for wi in work_items:
         rows.append(
@@ -689,7 +671,6 @@ def render_risk_heatmap(plan: Dict[str, Any]):
         st.info("No risks defined in the plan.")
         return
 
-    # Simple textual + pseudo grid representation
     cols = st.columns(3)
     with cols[0]:
         st.markdown("**High Impact / High Probability**")
@@ -717,7 +698,6 @@ def render_dependency_graph(plan: Dict[str, Any]):
         return
 
     work_items = {w.get("id"): w for w in plan.get("workItems", [])}
-    # Render a simple Graphviz DOT graph
     nodes = []
     edges = []
     for wid, w in work_items.items():
@@ -752,11 +732,15 @@ def render_agents_tab():
     st.subheader(ui["agents_tab"])
 
     st.markdown(f"**{ui['shared_handoff']}**")
+    # Use a separate widget key and sync to internal state
     st.text_area(
         label="",
         value=st.session_state["handoff_buffer"],
-        key="handoff_buffer",
+        key="handoff_buffer_widget",
         height=120,
+    )
+    st.session_state["handoff_buffer"] = st.session_state.get(
+        "handoff_buffer_widget", ""
     )
 
     st.markdown("---")
@@ -770,7 +754,6 @@ def render_agents_tab():
         st.info("No work items to assign agents to.")
         return
 
-    # Map work items by agent
     agent_to_items: Dict[str, List[Dict[str, Any]]] = {a["id"]: [] for a in agents}
     for wi in work_items:
         aid = wi.get("assignedAgentId")
@@ -806,7 +789,6 @@ def render_agents_tab():
                     with col_run:
                         btn_key = f"run_{aid}_{wi.get('id')}"
                         if st.button(ui["run_agent"], key=btn_key):
-                            # Execute agent
                             try:
                                 model = agent.get("model") or st.session_state[
                                     "orchestrator_settings"
@@ -822,7 +804,9 @@ def render_agents_tab():
                                     max_tokens=max_tokens,
                                 )
                                 st.session_state["last_agent_output"] = result
+                                # Update internal state (not widget key)
                                 st.session_state["handoff_buffer"] = result
+                                st.session_state["handoff_buffer_widget"] = result
                                 st.success("Agent execution completed.")
                             except Exception as e:
                                 st.error(f"Agent call failed: {e}")
@@ -897,7 +881,6 @@ def render_refinement_tab():
         if st.button(ui["apply_refinement"]):
             try:
                 fragment_obj = parse_json_from_llm(frag)
-                # Naive merge: if fragment has workItems, replace whole array; same for risks/timeline/dependencies
                 plan = st.session_state["project_plan"] or {}
                 for key in ["meta", "workItems", "timeline", "risks", "dependencies"]:
                     if key in fragment_obj:
@@ -1039,29 +1022,31 @@ def render_api_key_section():
 def sidebar_controls():
     ui = get_ui_text()
     st.sidebar.markdown("### UI")
+
+    # Use widget keys different from internal state keys to avoid conflicts
     theme = st.sidebar.radio(
         ui["theme"],
         options=["light", "dark"],
-        index=0 if st.session_state["theme"] == "light" else 1,
-        key="theme",
+        key="theme_widget",
         horizontal=True,
+        index=0 if st.session_state["theme"] == "light" else 1,
     )
     st.session_state["theme"] = theme
 
     lang = st.sidebar.radio(
         ui["language"],
         options=[LANG_EN, LANG_ZH],
-        index=0 if st.session_state["lang"] == LANG_EN else 1,
-        key="lang",
+        key="lang_widget",
         horizontal=True,
+        index=0 if st.session_state["lang"] == LANG_EN else 1,
     )
     st.session_state["lang"] = lang
 
-    apply_custom_theme()  # re-apply after lang/theme changes
-    ui = get_ui_text()  # refresh
+    apply_custom_theme()
+    ui = get_ui_text()
 
     st.sidebar.markdown("### 🎨 Style")
-    style = st.sidebar.selectbox(
+    st.sidebar.selectbox(
         ui["painter_style"],
         options=PAINTER_STYLES,
         index=PAINTER_STYLES.index(st.session_state["painter_style"])
@@ -1088,7 +1073,7 @@ def main():
     init_session_state()
     init_api_keys_from_env()
     apply_custom_theme()
-    refresh_config()  # Load on start; users can also refresh manually
+    refresh_config()
 
     sidebar_controls()
     ui = get_ui_text()
@@ -1115,7 +1100,6 @@ def main():
         ]
     )
 
-    # Dashboard Tab
     with tabs[0]:
         run_orchestrator_ui()
         plan = st.session_state["project_plan"]
@@ -1135,15 +1119,12 @@ def main():
             with col4:
                 render_dependency_graph(plan)
 
-    # Agents Tab
     with tabs[1]:
         render_agents_tab()
 
-    # Refinement / Chat Tab
     with tabs[2]:
         render_refinement_tab()
 
-    # Skills Tab
     with tabs[3]:
         st.subheader(ui["skills_tab"])
         skills = st.session_state["skills"]
@@ -1158,7 +1139,6 @@ def main():
                     if s.get("raw"):
                         st.code(s["raw"], language="markdown")
 
-    # Config Tab
     with tabs[4]:
         render_api_key_section()
         st.markdown("---")
